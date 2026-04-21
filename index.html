@@ -2490,6 +2490,7 @@ class GameScene extends Phaser.Scene{
     });
     this.events.on('playerDead',()=>this._gameOver());
 
+    this._setupDebug();
     this._intro();
     this.time.delayedCall(1800,()=>this._levelSelect());
   }
@@ -2971,6 +2972,100 @@ class GameScene extends Phaser.Scene{
       if(Phaser.Input.Keyboard.JustDown(k1))pick(1);
       else if(Phaser.Input.Keyboard.JustDown(k2))pick(2);
     }});
+  }
+
+  // ── DEBUG MENU (toggle with § / backtick) ────────────────────
+  _setupDebug(){
+    this._dbg={open:false,god:false,ui:[]};
+    const scene=this;
+    // Wrap player.hit for god-mode
+    const origHit=this.player.hit.bind(this.player);
+    this.player.hit=function(...a){ if(scene._dbg.god)return; return origHit(...a); };
+    // Toggle handler — very permissive to handle various keyboard layouts
+    const handler=(ev)=>{
+      const k=ev.key, c=ev.code;
+      if(k==='§'||k==='½'||k==='~'||k==='`'
+         ||c==='IntlBackslash'||c==='Backquote'
+         ||ev.keyCode===192||ev.keyCode===220||ev.keyCode===223
+         ||ev.which===167){
+        if(ev.preventDefault)ev.preventDefault();
+        scene._toggleDebug();
+      }
+    };
+    // Bind at BOTH DOM and Phaser levels so it fires regardless of focus
+    window.addEventListener('keydown',handler);
+    this.input.keyboard.on('keydown',handler);
+    this._dbgHandler=handler;
+    // Visible on-screen toggle button (top-right, under HUD) as fallback
+    const btn=this.add.rectangle(GW-42,14,72,20,0x220033,0.85).setStrokeStyle(1,0xff0088).setScrollFactor(0).setDepth(99).setInteractive({useHandCursor:true});
+    const btnTxt=this.add.text(GW-42,14,'§ DEBUG',{fontFamily:'Impact',fontSize:'12px',color:'#ff0088'}).setOrigin(.5,.5).setScrollFactor(0).setDepth(99);
+    btn.on('pointerdown',()=>this._toggleDebug());
+  }
+  _toggleDebug(){ if(this._dbg.open)this._closeDebug(); else this._openDebug(); }
+  _closeDebug(){
+    this._dbg.ui.forEach(o=>{try{o.destroy();}catch(e){}});
+    this._dbg.ui=[];this._dbg.open=false;
+  }
+  _openDebug(){
+    const s=this,d=this._dbg;d.open=true;
+    const add=(o)=>{d.ui.push(o);o.setScrollFactor&&o.setScrollFactor(0);o.setDepth&&o.setDepth(100);return o;};
+    const W=380,H=470,X=GW-W-8,Y=54;
+    add(s.add.rectangle(X+W/2,Y+H/2,W,H,0x000000,0.92).setStrokeStyle(2,0xff0088));
+    add(s.add.text(X+10,Y+6,'DEBUG MENU   [§ to close]',{fontFamily:'Impact',fontSize:'16px',color:'#ff0088'}));
+    let cy=Y+32;
+    const section=(label)=>{ add(s.add.text(X+10,cy,label,{fontFamily:'Impact',fontSize:'13px',color:'#00f0ff'})); cy+=18; };
+    const btn=(x,y,w,h,label,color,onClick)=>{
+      const r=add(s.add.rectangle(x+w/2,y+h/2,w,h,color,0.85).setStrokeStyle(1,0xffffff,0.6).setInteractive({useHandCursor:true}));
+      add(s.add.text(x+w/2,y+h/2,label,{fontFamily:'Arial',fontSize:'11px',color:'#ffffff'}).setOrigin(.5,.5));
+      r.on('pointerdown',onClick);
+    };
+    // STAGES
+    section('STAGES (jump):');
+    STAGES.forEach((sd,i)=>{
+      const col=i%4,row=Math.floor(i/4);
+      btn(X+10+col*88,cy+row*24,84,20,`${i+1}: ${sd.label.slice(0,9)}`,0x222266,()=>s._jumpStage(i));
+    });
+    cy+=52;
+    // PLAYER
+    section('PLAYER:');
+    btn(X+10,cy,80,22,'HEAL',0x006622,()=>{s.player.hp=s.player.maxHp;s.events.emit('playerHp',s.player.hp);});
+    btn(X+95,cy,100,22,d.god?'GOD: ON':'GOD: OFF',d.god?0x886600:0x444444,()=>{d.god=!d.god;s._closeDebug();s._openDebug();});
+    btn(X+200,cy,80,22,'HURT 20',0x662222,()=>{const wasGod=d.god;d.god=false;s.player.iF=0;s.player.hit(20,100,-40,s.player.x+50);d.god=wasGod;});
+    cy+=28;
+    // SPAWN
+    section('SPAWN:');
+    btn(X+10,cy,80,22,'+ GRUNT',0x004488,()=>{const n=s.enemies.getChildren().length;s._spawnEnemy('grunt',n,n+1);});
+    btn(X+95,cy,80,22,'+ HEAVY',0x884400,()=>{const n=s.enemies.getChildren().length;s._spawnEnemy('heavy',n,n+1);});
+    btn(X+180,cy,100,22,'KILL ALL',0x662200,()=>{s.enemies.getChildren().forEach(e=>{try{if(e.hit)e.hit(9999,0,0,e.x+1);else{e.hp=0;e.destroy();}}catch(ex){}});});
+    cy+=28;
+    // MUTATIONS
+    section('MUTATIONS (toggle):');
+    ALL_MUTS.forEach((m,i)=>{
+      const col=i%2,row=Math.floor(i/2),on=!!s.muts[m.id];
+      btn(X+10+col*180,cy+row*22,175,20,`${on?'[x]':'[ ]'} ${m.name}`,on?0x552266:0x222233,()=>{
+        if(on){s.muts[m.id]=false;s._mutList=s._mutList.filter(x=>x!==m.id);}
+        else{s.muts[m.id]=true;if(!s._mutList.includes(m.id))s._mutList.push(m.id);}
+        s._closeDebug();s._openDebug();
+      });
+    });
+    cy+=22*4+6;
+    // MISC
+    section('MISC:');
+    btn(X+10,cy,88,22,'KILL BOSS',0x662266,()=>{if(s.boss){try{s.boss.hp=0;s.events.emit('bossKilled');s.boss.destroy();}catch(e){}s.boss=null;s._bossMode=false;}});
+    btn(X+103,cy,92,22,'NEXT STAGE',0x226622,()=>s._jumpStage(Math.min(STAGES.length-1,(s._stageIdx||0)+1)));
+    btn(X+200,cy,80,22,'CLR MUTS',0x444444,()=>{s.muts={};s._mutList=[];s._closeDebug();s._openDebug();});
+  }
+  _jumpStage(i){
+    const s=this;
+    s._pending=false;s._bossMode=false;
+    s.enemies.getChildren().forEach(e=>{try{e.destroy();}catch(ex){}});
+    if(s.boss){try{s.boss.destroy();}catch(e){}s.boss=null;}
+    if(s._topHUD?.setBossHp)s._topHUD.setBossHp(0,0);
+    s.player.setPosition(170,FLOOR_Y);
+    s.player.hp=s.player.maxHp;s.player.iF=0;
+    s.events.emit('playerHp',s.player.hp);
+    s._closeDebug();
+    s._startStage(i);
   }
 
   _checkWaveClear(){
