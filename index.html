@@ -55,7 +55,17 @@ const HITS={
   UPPERCUT:{dmg:22,stopMs:180,shake:8,kbX:140,kbY:-380},
   KICK:    {dmg:18,stopMs:130,shake:6,kbX:280,kbY:-50 },
   THROW:   {dmg:32,stopMs:200,shake:9,kbX:300,kbY:-260},
+  FLYING:  {dmg:28,stopMs:200,shake:8,kbX:360,kbY:-140},
+  GRABKICK:{dmg:40,stopMs:240,shake:10,kbX:420,kbY:-360},
+  DIVEKICK:{dmg:34,stopMs:220,shake:9,kbX:220,kbY:-180},
+  SPINKICK:{dmg:26,stopMs:170,shake:7,kbX:340,kbY:-80 },
+  DASHPUNCH:{dmg:24,stopMs:160,shake:7,kbX:360,kbY:-70 },
+  HAYMAKER:{dmg:30,stopMs:210,shake:9,kbX:340,kbY:-120},
+  AXEKICK: {dmg:28,stopMs:200,shake:8,kbX:120,kbY:-60 },
 };
+// Crowd-pleaser callouts (random flavour text on bigger hits)
+const HYPE_WORDS=['BRUTAL!','VICIOUS!','WICKED!','CHAOS!','SAVAGE!','INSANE!','DEVASTATION!','WRECKED!','RIPPED!','SHREDDED!','OBLITERATED!','PULVERIZED!','NUKED!','MAYHEM!','DOMINATED!'];
+function hype(){return HYPE_WORDS[(Math.random()*HYPE_WORDS.length)|0];}
 
 // ── Stage layout ──────────────────────────────────────────────
 const STAGES=[
@@ -69,9 +79,14 @@ const STAGES=[
   {level:2,label:'MAIN DANCE FLOOR', grunts:2,heavies:3,boss:false,club:true},
   {level:2,label:'THE BACK ROOM',    grunts:5,heavies:3,boss:false,club:true},
   {level:2,label:'THE GLITTER PIT',  grunts:0,heavies:0,boss:true, boss2:true},
+  // ── LEVEL 3 ── harbor / industrial district, boss in underground shrine
+  {level:3,label:'HARBOR DOCKS',      grunts:3,heavies:1,boss:false,bgStyle:'city'},
+  {level:3,label:'FISH MARKET',       grunts:4,heavies:2,boss:false,bgStyle:'alley'},
+  {level:3,label:'THE WAREHOUSE',     grunts:5,heavies:3,boss:false,bgStyle:'neon'},
+  {level:3,label:'SHRINE OF THE WANG',grunts:0,heavies:0,boss:true, boss3:true,bgStyle:'darkAlley'},
 ];
 // Stage index where each level starts
-const LEVEL_STARTS=[0,4];
+const LEVEL_STARTS=[0,4,8];
 
 // ── Mutations ─────────────────────────────────────────────────
 const ALL_MUTS=[
@@ -84,6 +99,16 @@ const ALL_MUTS=[
   {id:'BLOODLUST',name:'BLOODLUST',      badge:'2X DMG', col:0xff2200,sym:'X2'},
   {id:'GRAPPLER', name:'GRAPPLER',       badge:'THROW!', col:C.purple,sym:'()'},
 ];
+const MUT_DESCS={
+  EXPLOSIVE: 'Hits create small explosions that chain damage.',
+  VAMPIRE:   'Heal a chunk of HP on every successful hit.',
+  CHAIN:     'Grabs can link into another grab — combo any enemy.',
+  BERSERKER: 'Faster attacks + longer combo window.',
+  IRONSKIN:  '30% less damage taken. Built like a tank.',
+  ADRENALINE:'Big speed boost after each kill.',
+  BLOODLUST: 'All damage doubled. Glass-cannon mode.',
+  GRAPPLER:  'Throws, slams and grab-kicks hit twice as hard.',
+};
 function pickMuts(active){return Phaser.Utils.Array.Shuffle([...ALL_MUTS.filter(m=>!active.includes(m.id))]).slice(0,3);}
 
 // ════════════════════════════════════════════════════════════════
@@ -482,13 +507,41 @@ function buildTextures(scene){
 class ImpactEngine{
   constructor(s){this.scene=s;this._frozen=false;}
   onHit(x,y,hd,right,explosive){
-    this.shake(hd.shake,hd.stopMs+80);
+    this.shake(hd.shake*1.35,hd.stopMs+120);
     this.stop(hd.stopMs);
     this.blood(x,y,right?1:-1,hd.dmg);
-    this.sparks(x,y,hd.shake);
+    this.sparks(x,y,Math.ceil(hd.shake*1.6));
     this.ring(x,y,hd.shake>5?C.yellow:C.white);
+    if(hd.shake>=4){ this.radialLines(x,y,hd.shake>=8?14:hd.shake>=6?10:6,right?1:-1); }
+    if(hd.shake>=6){
+      // Heavy-hit freeze frame: camera flash + zoom pulse + chromatic split
+      this.scene.cameras.main.flash(90,255,200,80,false);
+      const cam=this.scene.cameras.main;
+      this.scene.tweens.killTweensOf(cam);
+      cam.zoom=1;
+      this.scene.tweens.add({targets:cam,zoom:1.06,duration:70,yoyo:true,ease:'Quad.Out',onComplete:()=>{cam.zoom=1;}});
+      this.afterImage(x,y,hd.shake);
+    }
     if(hd.kbY<-280) this.flare(x,y);
     if(explosive) this.explode(x,y);
+  }
+  radialLines(x,y,n,dir){
+    const s=this.scene,g=s.add.graphics().setDepth(7).setPosition(x,y);
+    for(let i=0;i<n;i++){
+      const a=(i/n)*Math.PI*2,len=44+Math.random()*32;
+      g.lineStyle(3,i%2?C.yellow:0xffffff,0.9);
+      g.lineBetween(Math.cos(a)*14,Math.sin(a)*14,Math.cos(a)*len,Math.sin(a)*len);
+    }
+    s.tweens.add({targets:g,alpha:0,scaleX:1.9,scaleY:1.9,duration:260,ease:'Quad.Out',onComplete:()=>g.destroy()});
+  }
+  afterImage(x,y,k){
+    const s=this.scene;
+    [C.pink,C.cyan,C.yellow].forEach((col,i)=>{
+      const g=s.add.graphics().setDepth(6);
+      g.fillStyle(col,0.55);g.fillCircle(0,0,16+k);
+      g.setPosition(x+(i-1)*5,y);
+      s.tweens.add({targets:g,scaleX:2.4,scaleY:2.4,alpha:0,duration:180+i*40,ease:'Quad.Out',onComplete:()=>g.destroy()});
+    });
   }
   shake(i,d){this.scene.cameras.main.shake(d,i*0.001);}
   stop(ms){
@@ -568,7 +621,10 @@ class Player extends Phaser.Physics.Arcade.Sprite{
       K:[kb.addKey(K.K),kb.addKey(K.X)],
       G:[kb.addKey(K.G),kb.addKey(K.V)],
       U:[kb.addKey(K.W),kb.addKey(K.UP)],
+      D:[kb.addKey(K.S),kb.addKey(K.DOWN)],
     };
+    // Dash-tap tracking: remember last L/R tap direction + time for double-tap dash
+    this._dashTap={dir:0,t:0};
   }
   dn(a){return this.K[a].some(k=>k.isDown);}
   jd(a){return this.K[a].some(k=>Phaser.Input.Keyboard.JustDown(k));}
@@ -586,22 +642,48 @@ class Player extends Phaser.Physics.Arcade.Sprite{
     if(this.chainT<=0)this.chain=0;
 
     const pN=this.jd('P'),kN=this.jd('K'),gN=this.jd('G'),jN=this.jd('J');
-    const goL=this.dn('L'),goR=this.dn('R');
+    const goL=this.dn('L'),goR=this.dn('R'),dnHeld=this.dn('D');
+    // Double-tap detect for dash-punch
+    const lJ=this.K.L[0].isDown||this.K.L[1].isDown, rJ=this.K.R[0].isDown||this.K.R[1].isDown;
+    const lPress=Phaser.Input.Keyboard.JustDown(this.K.L[0])||Phaser.Input.Keyboard.JustDown(this.K.L[1]);
+    const rPress=Phaser.Input.Keyboard.JustDown(this.K.R[0])||Phaser.Input.Keyboard.JustDown(this.K.R[1]);
+    const nowT=t||0;
+    let dashReady=0;
+    if(lPress){
+      if(this._dashTap.dir===-1&&nowT-this._dashTap.t<260)dashReady=-1;
+      this._dashTap={dir:-1,t:nowT};
+    }
+    if(rPress){
+      if(this._dashTap.dir===1&&nowT-this._dashTap.t<260)dashReady=1;
+      this._dashTap={dir:1,t:nowT};
+    }
 
-    // GRAB hold
+    // GRAB hold — lock player in place so they can't drift, hold grabbed enemy
     if(this.ps===PS.GRAB){
       if(this.grabbed&&this.grabbed.active&&this.grabbed.es!==ES.DEAD){
+        // Clamp player fully — no drift, no falling
+        this.setVelocityX(0);
+        if(this.onGnd)this.setVelocityY(0);
         this.grabbed.x=this.x+this.facing*50;
         this.grabbed.y=this.y-6;
         this.grabbed.body.setVelocity(0,0);
         this.grabT-=dt;
+        if(kN){this._grabKick();return;}           // K during grab → launching kick
+        if(pN){this._grabSlam();return;}           // J during grab → slam-down combo
         if(gN||this.grabT<=0)this._throw();
       } else {this.ps=this.onGnd?PS.IDLE:PS.JUMP;this.grabbed=null;}
       this._tex();return;
     }
 
-    // Attack input
+    // Attack input — airborne K+DOWN = DIVEKICK, airborne K = flying kick,
+    // ground K at chain=3 = SPINKICK, ground P+dash = DASHPUNCH, else basic chain
     if(gN&&this.atkCd<=0&&this.ps!==PS.HURT){this._tryGrab();return;}
+    if(kN&&!this.onGnd&&dnHeld&&this.ps!==PS.HURT&&this.atkCd<=0){this._divekick();return;}
+    if(kN&&!this.onGnd&&this.ps!==PS.HURT&&this.atkCd<=0){this._flyingKick();return;}
+    if(pN&&!this.onGnd&&this.ps!==PS.HURT&&this.atkCd<=0){this._airHaymaker();return;}
+    if(pN&&dashReady&&this.onGnd&&this.atkCd<=0&&this.ps!==PS.HURT){this.facing=dashReady;this.setFlipX(this.facing<0);this._dashTap={dir:0,t:0};this._dashpunch();return;}
+    if(kN&&this.onGnd&&this.chain>=3&&this.atkCd<=0&&this.ps!==PS.HURT){this._spinkick();return;}
+    if(pN&&this.onGnd&&dnHeld&&this.atkCd<=0&&this.ps!==PS.HURT){this._axekick();return;}
     if((pN||kN)&&this.atkCd<=0&&this.ps!==PS.HURT){this._atk(kN?'KICK':null);return;}
 
     // Move
@@ -625,30 +707,265 @@ class Player extends Phaser.Physics.Arcade.Sprite{
       const d=Math.abs(e.x-this.x);if(d<minD){minD=d;near=e;}
     }
     if(!near){this._atk(null);return;}
+    // Lock player in place — no drift
+    this.setVelocityX(0);
+    if(this.onGnd)this.setVelocityY(0);
     near.es=ES.GRAB;near.body.setVelocity(0,0);
     this.grabbed=near;this.grabT=1800;this.ps=PS.GRAB;
     this.facing=near.x>=this.x?1:-1;this.setFlipX(this.facing<0);
     this.scene.ie.shake(2,100);
+    this.scene.ie.radialLines(near.x,near.y-40,6,this.facing);
     this.scene._pop('GRAB!',C.cyan,this.x,this.y-100,true);
   }
 
   _throw(){
     const e=this.grabbed;this.grabbed=null;
-    this.ps=this.onGnd?PS.IDLE:PS.JUMP;this.atkCd=260;
+    this.ps=this.onGnd?PS.IDLE:PS.JUMP;this.atkCd=280;
     if(!e||!e.active||e.es===ES.DEAD)return;
     const mult=this.scene.muts?.GRAPPLER?2:1;
     const dmg=Math.round(HITS.THROW.dmg*mult);
     e.es=ES.THROWN;
-    e.body.setVelocity(this.facing*360,-300);
-    this.scene.time.delayedCall(60,()=>{
+    // Arc throw — faster + higher
+    e.body.setVelocity(this.facing*480,-360);
+    // Afterimage trail on the flying enemy
+    this._trailTarget(e, 5, 70, 0x00f0ff);
+    this.scene.ie.shake(6,200);
+    this.scene.ie.radialLines(this.x+this.facing*40,this.y-60,10,this.facing);
+    this.scene.time.delayedCall(50,()=>{
       if(e.active&&e.es!==ES.DEAD){
         e._applyDmg(dmg,this.x);
         this.scene.ie.onHit(e.x,e.y-50,HITS.THROW,this.facing>0);
         this.scene.ie.dmgTxt(e.x,e.y-90,dmg,true);
         this.scene.cs.hit();
-        this.scene._pop('LAUNCH!',C.yellow,GW-100,FLOOR_Y-80,false);
+        this.scene._pop('LAUNCH!!',C.yellow,GW-100,FLOOR_Y-80,false);
       }
     });
+  }
+
+  // ── Grab-kick: K during grab — launching roundhouse with BIG visuals ──
+  _grabKick(){
+    const e=this.grabbed;this.grabbed=null;
+    this.ps=this.onGnd?PS.IDLE:PS.JUMP;this.atkCd=320;
+    this.curAtk='KICK';
+    if(!e||!e.active||e.es===ES.DEAD)return;
+    const mult=this.scene.muts?.GRAPPLER?2:1;
+    const dmg=Math.round(HITS.GRABKICK.dmg*mult);
+    e.es=ES.LAUNCHED;
+    // Big horizontal blast with upward arc
+    e.body.setVelocity(this.facing*560,-420);
+    this._trailTarget(e,7,90,C.orange);
+    this.scene.ie.shake(10,320);
+    this.scene.ie.radialLines(e.x,e.y-40,14,this.facing);
+    this.scene.ie.ring(e.x,e.y-40,C.orange);
+    this.scene.ie.flare(e.x,e.y-30);
+    // Camera zoom punch
+    const cam=this.scene.cameras.main;
+    this.scene.tweens.killTweensOf(cam);
+    cam.zoom=1;
+    this.scene.tweens.add({targets:cam,zoom:1.08,duration:90,yoyo:true,ease:'Quad.Out',onComplete:()=>{cam.zoom=1;}});
+    this.scene.time.delayedCall(40,()=>{
+      if(e.active&&e.es!==ES.DEAD){
+        e._applyDmg(dmg,this.x);
+        this.scene.ie.onHit(e.x,e.y-50,HITS.GRABKICK,this.facing>0);
+        this.scene.ie.dmgTxt(e.x,e.y-90,dmg,true);
+        this.scene.cs.hit();this.scene.cs.hit();
+        this.scene._bigPop('MEGA KICK!!',C.orange);
+      }
+    });
+  }
+
+  // ── Grab-slam: J during grab — slam down + shockwave ──────────────
+  _grabSlam(){
+    const e=this.grabbed;this.grabbed=null;
+    this.ps=this.onGnd?PS.IDLE:PS.JUMP;this.atkCd=280;
+    this.curAtk='UPPERCUT';
+    if(!e||!e.active||e.es===ES.DEAD)return;
+    const mult=this.scene.muts?.GRAPPLER?2:1;
+    const dmg=Math.round(HITS.THROW.dmg*1.15*mult);
+    e.es=ES.THROWN;
+    // Slam into the ground next to player
+    const slamX=this.x+this.facing*60;
+    this.scene.tweens.add({targets:e,x:slamX,y:FLOOR_Y-10,duration:110,ease:'Quad.In',onComplete:()=>{
+      if(!e.active||e.es===ES.DEAD)return;
+      e.body.setVelocity(this.facing*180,-180);
+      this.scene.ie.ring(slamX,FLOOR_Y,C.red);
+      this.scene.ie.shake(9,300);
+      this.scene.ie.radialLines(slamX,FLOOR_Y-10,12,this.facing);
+      e._applyDmg(dmg,this.x);
+      this.scene.ie.onHit(slamX,FLOOR_Y-30,HITS.THROW,this.facing>0);
+      this.scene.ie.dmgTxt(slamX,FLOOR_Y-70,dmg,true);
+      this.scene.cs.hit();
+      this.scene._bigPop('SLAM!!',C.red);
+    }});
+  }
+
+  // ── Flying kick: K in air — horizontal dash with damaging hitbox ───
+  _flyingKick(){
+    this.curAtk='KICK';this.ps=PS.ATK;this.atkCd=380;
+    const dir=this.facing;
+    // Forward-down dash velocity
+    this.setVelocityX(dir*520);
+    if(this.body.velocity.y<0)this.setVelocityY(this.body.velocity.y*0.3);
+    this.setVelocityY(Math.max(this.body.velocity.y,60));
+    // Active hitbox travels with the player for the duration
+    const end=Date.now()+240;
+    this.hb={x:this.x+dir*56,y:this.y-42,w:78,h:54,hd:HITS.FLYING,active:true};
+    // Refresh hitbox position each tick via a timer
+    const tick=this.scene.time.addEvent({delay:20,repeat:12,callback:()=>{
+      if(this.hb){this.hb.x=this.x+dir*56;this.hb.y=this.y-42;}
+    }});
+    // Flame trail
+    this._trailSelf(10, 50, C.orange);
+    this.scene.ie.radialLines(this.x,this.y-30,8,dir);
+    this.scene._pop('FLY KICK!',C.orange,this.x,this.y-80,true);
+    this.scene.time.delayedCall(240,()=>{
+      if(this.hb)this.hb.active=false;
+      tick.remove(false);
+    });
+    this.scene.time.delayedCall(320,()=>{
+      if(this.ps===PS.ATK){this.ps=this.onGnd?PS.IDLE:PS.JUMP;this.curAtk=null;}
+    });
+  }
+
+  // ── DIVE KICK: DOWN + K in air — straight-down stomp with crater ring ──
+  _divekick(){
+    this.curAtk='KICK';this.ps=PS.ATK;this.atkCd=360;
+    // Full downward thrust
+    this.setVelocityX(this.facing*80);
+    this.setVelocityY(900);
+    const dir=this.facing;
+    this.hb={x:this.x+dir*20,y:this.y-24,w:62,h:70,hd:HITS.DIVEKICK,active:true};
+    const tick=this.scene.time.addEvent({delay:18,repeat:20,callback:()=>{
+      if(this.hb){this.hb.x=this.x+dir*20;this.hb.y=this.y-24;}
+    }});
+    this._trailSelf(9,40,C.cyan);
+    this.scene._pop('DIVE KICK!',C.cyan,this.x,this.y-80,true);
+    // On landing: crater shockwave
+    const landCheck=this.scene.time.addEvent({delay:30,repeat:40,callback:()=>{
+      if(this.onGnd){
+        landCheck.remove(false);
+        tick.remove(false); // stop position-tick so it doesn't overwrite crater hb
+        const cx=this.x,cy=FLOOR_Y;
+        this.scene.ie.ring(cx,cy-2,C.cyan);
+        this.scene.ie.ring(cx,cy-2,C.white);
+        this.scene.ie.radialLines(cx,cy-8,14,1);
+        this.scene.ie.shake(10,300);
+        this.scene.ie.sparks(cx,cy-4,18);
+        // Extend hitbox as ground shockwave
+        this.hb={x:cx,y:cy-22,w:180,h:40,hd:HITS.DIVEKICK,active:true};
+        this.scene.time.delayedCall(100,()=>{if(this.hb)this.hb.active=false;});
+        this.scene._bigPop('CRATER!!',C.cyan);
+      }
+    }});
+    this.scene.time.delayedCall(380,()=>{tick.remove(false);if(this.hb)this.hb.active=false;if(this.ps===PS.ATK){this.ps=this.onGnd?PS.IDLE:PS.JUMP;this.curAtk=null;}});
+  }
+
+  // ── SPIN KICK: after chain 3 pressing K — AoE wide sweep, both sides ──
+  _spinkick(){
+    this.curAtk='KICK';this.ps=PS.ATK;this.atkCd=430;this.chain=0;
+    const dir=this.facing;
+    // Visual: rotating slash ring
+    const g=this.scene.add.graphics().setDepth(6).setPosition(this.x,this.y-44);
+    g.lineStyle(5,C.pink,0.95);g.strokeCircle(0,0,64);
+    g.lineStyle(3,C.yellow,0.9);g.strokeCircle(0,0,46);
+    this.scene.tweens.add({targets:g,alpha:0,scaleX:1.6,scaleY:1.6,rotation:Math.PI*1.2,duration:360,onComplete:()=>g.destroy()});
+    // Wide double-sided hitbox activates in pulses (front then back)
+    this.hb={x:this.x+dir*44,y:this.y-44,w:96,h:66,hd:HITS.SPINKICK,active:true};
+    this.scene.time.delayedCall(120,()=>{
+      if(this.ps===PS.ATK)this.hb={x:this.x-dir*44,y:this.y-44,w:96,h:66,hd:HITS.SPINKICK,active:true};
+    });
+    this.scene.ie.radialLines(this.x,this.y-44,14,dir);
+    this.scene.ie.radialLines(this.x,this.y-44,14,-dir);
+    this._trailSelf(7,36,C.pink);
+    this.scene._bigPop('SPIN KICK!!',C.pink);
+    this.scene.time.delayedCall(240,()=>{if(this.hb)this.hb.active=false;});
+    this.scene.time.delayedCall(380,()=>{if(this.ps===PS.ATK){this.ps=this.onGnd?PS.IDLE:PS.JUMP;this.curAtk=null;}});
+  }
+
+  // ── DASH PUNCH: double-tap L/R then P — slide forward with heavy cross ──
+  _dashpunch(){
+    this.curAtk='CROSS';this.ps=PS.ATK;this.atkCd=360;
+    const dir=this.facing;
+    this.setVelocityX(dir*540);
+    this.hb={x:this.x+dir*50,y:this.y-40,w:80,h:52,hd:HITS.DASHPUNCH,active:true};
+    const tick=this.scene.time.addEvent({delay:20,repeat:10,callback:()=>{
+      if(this.hb){this.hb.x=this.x+dir*50;this.hb.y=this.y-40;}
+    }});
+    this._trailSelf(8,36,C.yellow);
+    // Speed-line afterimage
+    const g=this.scene.add.graphics().setDepth(5);
+    g.lineStyle(3,C.yellow,0.85);
+    for(let i=0;i<6;i++){const yo=-20-i*8;g.lineBetween(this.x-dir*70,this.y+yo,this.x-dir*130,this.y+yo);}
+    this.scene.tweens.add({targets:g,alpha:0,duration:260,onComplete:()=>g.destroy()});
+    this.scene._bigPop('DASH PUNCH!!',C.yellow);
+    this.scene.time.delayedCall(220,()=>{if(this.hb)this.hb.active=false;tick.remove(false);});
+    this.scene.time.delayedCall(360,()=>{if(this.ps===PS.ATK){this.ps=this.onGnd?PS.IDLE:PS.JUMP;this.curAtk=null;}});
+  }
+
+  // ── AIR HAYMAKER: P in air — overhead arc punch from above ───────────
+  _airHaymaker(){
+    this.curAtk='CROSS';this.ps=PS.ATK;this.atkCd=340;
+    const dir=this.facing;
+    // Boost slight downward arc
+    this.setVelocityX(dir*300);
+    this.setVelocityY(Math.max(this.body.velocity.y,120));
+    this.hb={x:this.x+dir*46,y:this.y-30,w:72,h:64,hd:HITS.HAYMAKER,active:true};
+    const tick=this.scene.time.addEvent({delay:20,repeat:10,callback:()=>{
+      if(this.hb){this.hb.x=this.x+dir*46;this.hb.y=this.y-30;}
+    }});
+    // Arc slash visual
+    const g=this.scene.add.graphics().setDepth(6).setPosition(this.x,this.y-40);
+    g.lineStyle(4,C.orange,0.95);
+    g.beginPath();g.arc(0,0,48,Math.PI*1.2,Math.PI*1.8,false);g.strokePath();
+    this.scene.tweens.add({targets:g,alpha:0,scaleX:1.5,scaleY:1.5,duration:260,onComplete:()=>g.destroy()});
+    this._trailSelf(6,32,C.orange);
+    this.scene._pop('HAYMAKER!',C.orange,this.x,this.y-80,true);
+    this.scene.time.delayedCall(200,()=>{if(this.hb)this.hb.active=false;tick.remove(false);});
+    this.scene.time.delayedCall(340,()=>{if(this.ps===PS.ATK){this.ps=this.onGnd?PS.IDLE:PS.JUMP;this.curAtk=null;}});
+  }
+
+  // ── AXE KICK: DOWN + P on ground — downward heel drop ────────────────
+  _axekick(){
+    this.curAtk='KICK';this.ps=PS.ATK;this.atkCd=420;
+    const dir=this.facing;
+    // Short hop + slam-down
+    this.setVelocityY(-180);
+    this.scene.time.delayedCall(120,()=>{if(this.body)this.setVelocityY(600);});
+    this.hb={x:this.x+dir*38,y:this.y-50,w:58,h:90,hd:HITS.AXEKICK,active:true};
+    const tick=this.scene.time.addEvent({delay:18,repeat:14,callback:()=>{
+      if(this.hb){this.hb.x=this.x+dir*38;this.hb.y=this.y-50;}
+    }});
+    // Descending line slash
+    const g=this.scene.add.graphics().setDepth(6).setPosition(this.x+dir*30,this.y-90);
+    g.lineStyle(5,C.red,0.95);g.lineBetween(0,0,0,90);
+    g.lineStyle(2,C.white,1);g.lineBetween(0,0,0,90);
+    this.scene.tweens.add({targets:g,alpha:0,scaleY:1.4,duration:300,onComplete:()=>g.destroy()});
+    this._trailSelf(6,34,C.red);
+    this.scene._pop('AXE KICK!',C.red,this.x,this.y-80,true);
+    this.scene.time.delayedCall(260,()=>{if(this.hb)this.hb.active=false;tick.remove(false);});
+    this.scene.time.delayedCall(420,()=>{if(this.ps===PS.ATK){this.ps=this.onGnd?PS.IDLE:PS.JUMP;this.curAtk=null;}});
+  }
+
+  // ── Afterimage trail helper: repeats for `n` ticks every `ms` ms ───
+  _trailSelf(n,ms,col){
+    const s=this.scene;
+    for(let i=0;i<n;i++){
+      s.time.delayedCall(i*ms/3,()=>{
+        if(!this.active)return;
+        const g=s.add.image(this.x,this.y,this.texture.key).setOrigin(.5,1).setDepth(3).setTint(col).setAlpha(0.55).setFlipX(this.flipX);
+        s.tweens.add({targets:g,alpha:0,duration:220,onComplete:()=>g.destroy()});
+      });
+    }
+  }
+  _trailTarget(e,n,ms,col){
+    const s=this.scene;
+    for(let i=0;i<n;i++){
+      s.time.delayedCall(i*ms/3,()=>{
+        if(!e||!e.active)return;
+        const g=s.add.image(e.x,e.y,e.texture.key).setOrigin(.5,1).setDepth(3).setTint(col).setAlpha(0.55).setFlipX(e.flipX);
+        s.tweens.add({targets:g,alpha:0,duration:260,onComplete:()=>g.destroy()});
+      });
+    }
   }
 
   _atk(force){
@@ -664,6 +981,36 @@ class Player extends Phaser.Physics.Arcade.Sprite{
     this.scene.time.delayedCall(d*.12,()=>{
       const dir=this.facing,hy=tp==='UPPERCUT'?this.y-75:this.y-42;
       this.hb={x:this.x+dir*56,y:hy,w:74,h:52,hd:HITS[tp],active:true};
+      // Cool pre-impact flourishes
+      if(tp==='UPPERCUT'){
+        // Rising slash line
+        const g=this.scene.add.graphics().setDepth(6).setPosition(this.x+dir*40,this.y-30);
+        g.lineStyle(4,C.yellow,0.9);g.lineBetween(0,0,dir*10,-70);
+        g.lineStyle(2,C.white,1);g.lineBetween(0,0,dir*6,-70);
+        this.scene.tweens.add({targets:g,alpha:0,scaleX:1.6,scaleY:1.6,duration:260,onComplete:()=>g.destroy()});
+        this.scene.ie.radialLines(this.x+dir*40,this.y-90,10,dir);
+        this._trailSelf&&this._trailSelf(3,40,C.yellow);
+      } else if(tp==='CROSS'){
+        // Horizontal neon slash streak
+        const g=this.scene.add.graphics().setDepth(6).setPosition(this.x+dir*20,this.y-40);
+        g.lineStyle(4,C.cyan,0.95);g.lineBetween(0,0,dir*72,0);
+        g.lineStyle(2,C.white,1);g.lineBetween(0,-3,dir*60,-3);
+        this.scene.tweens.add({targets:g,alpha:0,scaleX:1.4,duration:220,onComplete:()=>g.destroy()});
+        this._trailSelf&&this._trailSelf(3,30,C.cyan);
+      } else if(tp==='JAB'){
+        // Quick pink jab streak
+        const g=this.scene.add.graphics().setDepth(6).setPosition(this.x+dir*24,this.y-42);
+        g.lineStyle(3,C.pink,0.9);g.lineBetween(0,0,dir*48,0);
+        this.scene.tweens.add({targets:g,alpha:0,scaleX:1.3,duration:160,onComplete:()=>g.destroy()});
+      } else if(tp==='KICK'){
+        // Orange crescent arc in front of leg
+        const g=this.scene.add.graphics().setDepth(6).setPosition(this.x+dir*30,this.y-28);
+        g.lineStyle(4,C.orange,0.95);
+        g.beginPath();g.arc(0,0,36,dir>0?-Math.PI*0.8:Math.PI*0.2,dir>0?-Math.PI*0.2:Math.PI*0.8,false);g.strokePath();
+        this.scene.tweens.add({targets:g,alpha:0,scaleX:1.5,scaleY:1.5,duration:260,onComplete:()=>g.destroy()});
+        this.scene.ie.radialLines(this.x+dir*50,this.y-40,6,dir);
+        this._trailSelf&&this._trailSelf(2,28,C.orange);
+      }
       this.scene.time.delayedCall(d*.38,()=>{if(this.hb)this.hb.active=false;});
     });
     this.scene.time.delayedCall(d*.78,()=>{if(this.ps===PS.ATK){this.ps=this.onGnd?PS.IDLE:PS.JUMP;this.curAtk=null;}});
@@ -1407,6 +1754,230 @@ class Boss2 extends Phaser.Physics.Arcade.Sprite{
 }
 
 // ════════════════════════════════════════════════════════════════
+//  BOSS 3 — THE GRAND WANG MASTER
+//  A purple-robed cult priest with CRAZY penis moves:
+//    • DOUBLE SWEEP  — mega schlong whips sideways (both directions)
+//    • SEED STORM    — seed-bombs rain from above
+//    • ERECT UPPERCUT— phallic rising uppercut with long reach
+//    • BALL STOMP    — giant jump → shockwave
+// ════════════════════════════════════════════════════════════════
+const BS3={IDLE:0,WALK:1,ATK:2,SWEEP_CHARGE:3,SWEEP:4,STORM:5,UPPER:6,STOMP:7,HURT:8,DEAD:9};
+class Boss3 extends Phaser.Physics.Arcade.Sprite{
+  constructor(s,x,y){
+    super(s,x,y,'boss_idle');
+    s.add.existing(this);s.physics.add.existing(this);
+    this.setOrigin(.5,1).setDepth(4);
+    this.body.setSize(50,80).setOffset(11,40);
+    this.body.setCollideWorldBounds(true);
+    // Purple-gold tint distinguishes from Boss1
+    this.setTint(0xcc44ff);
+    this.bs=BS3.IDLE;this.hp=650;this.maxHp=650;
+    this.iF=0;this.player=null;
+    this._aCd=800;this._wF=0;this._wT=0;
+    this._enraged=false;this._hitCount=0;
+    this._schlong=null;
+    this._lastMove=null;
+  }
+  get onGnd(){return this.body.blocked.down;}
+  preUpdate(t,dt){
+    super.preUpdate(t,dt);
+    if(this.body&&this.body.bottom>FLOOR_Y){this.body.y=FLOOR_Y-this.body.height;this.body.velocity.y=0;}
+    if(this.bs===BS3.DEAD)return;
+    this.iF=Math.max(0,this.iF-dt);
+    if(this._schlong&&this._schlong.active){
+      const sd=this.flipX?-1:1;
+      this._schlong.setPosition(this.x+sd*38,this.y-52);
+    }
+    if(this.bs===BS3.HURT||this.bs===BS3.SWEEP_CHARGE||this.bs===BS3.SWEEP||this.bs===BS3.STORM||this.bs===BS3.UPPER||this.bs===BS3.STOMP){this._tex();return;}
+    if(!this.player||this.player.ps===PS.DEAD)return;
+    const dx=this.player.x-this.x,dist=Math.abs(dx);
+    this.setFlipX(dx<0);
+    if(dist>140){this.setVelocityX(dx>0?110:-110);this.bs=BS3.WALK;}
+    else{
+      this.setVelocityX(0);this.bs=BS3.IDLE;
+      this._aCd-=dt;
+      if(this._aCd<=0){this._pickMove();this._aCd=Phaser.Math.Between(this._enraged?320:700,this._enraged?700:1200);}
+    }
+    this._wT+=dt;if(this.bs===BS3.WALK&&this._wT>170){this._wT=0;this._wF^=1;}
+    this._tex();
+  }
+  _pickMove(){
+    if(!this.player)return;
+    const d=Math.abs(this.player.x-this.x);
+    const pool=[];
+    if(d<130)pool.push('upper','sweep','stomp');
+    if(d>=130)pool.push('storm','sweep','stomp');
+    // Avoid repeating the same move back to back when possible
+    let pick=Phaser.Utils.Array.GetRandom(pool);
+    if(pool.length>1&&pick===this._lastMove)pick=Phaser.Utils.Array.GetRandom(pool.filter(m=>m!==this._lastMove));
+    this._lastMove=pick;
+    if(pick==='sweep')this._doSweep();
+    else if(pick==='storm')this._doStorm();
+    else if(pick==='upper')this._doUppercut();
+    else this._doStomp();
+  }
+  _doSweep(){
+    this.bs=BS3.SWEEP_CHARGE;this.setVelocityX(0);
+    this.scene._combatPop('DOUBLE SWEEP!!',0xff00ff,GW/2,GH/2-80,false);
+    // Show both schlongs — left + right
+    if(this._schlong){this._schlong.destroy();this._schlong=null;}
+    const sg=this.scene.add.graphics().setDepth(5);this._schlong=sg;
+    sg.setPosition(this.x,this.y-52);
+    const drawOne=(s)=>{
+      sg.fillStyle(0x221100,1);sg.fillRect(s*30-9,-15,18,9);
+      sg.fillStyle(0xd488ff,1);sg.fillCircle(s*25,9,9);sg.fillCircle(s*17,10,8);
+      sg.fillStyle(0xf0a8ff,1);sg.fillRect(s>0?s*25:s*25-44,-7,44,14);
+      sg.fillStyle(0xee88ee,1);sg.fillCircle(s*68,0,13);
+      sg.fillStyle(C.yellow,1);sg.fillCircle(s*78,0,5);
+    };
+    drawOne(1);drawOne(-1);
+    sg.setAlpha(0);this.scene.tweens.add({targets:sg,alpha:1,duration:260});
+    this.scene.time.delayedCall(700,()=>{
+      if(!this.active||this.bs===BS3.DEAD){this._cleanSchlong();return;}
+      this.bs=BS3.SWEEP;
+      this.scene._combatPop('WHIP!!',0xff00ff,GW/2,GH/2-60,false);
+      this.scene.ie.shake(7,350);
+      // Damage in BOTH directions close-range
+      if(this.player&&this.player.active){
+        const dx=Math.abs(this.player.x-this.x);
+        if(dx<170){this.player.hit(26,240,-60,this.x);this.scene.ie.flash(this.player);this.scene.ie.radialLines(this.player.x,this.player.y-50,10,1);}
+      }
+      this.scene.time.delayedCall(500,()=>{
+        this._cleanSchlong();
+        if(this.bs!==BS3.DEAD)this.bs=BS3.IDLE;
+      });
+    });
+  }
+  _doStorm(){
+    this.bs=BS3.STORM;this.setVelocityX(0);
+    this.scene._combatPop('SEED STORM!!',C.yellow,GW/2,GH/2-80,false);
+    this.scene.ie.shake(5,400);
+    // Drop 7 seed-bombs from the sky across the screen
+    for(let i=0;i<7;i++){
+      const dropX=Phaser.Math.Between(80,GW-80);
+      this.scene.time.delayedCall(i*160,()=>{
+        if(!this.scene||!this.scene.add)return;
+        // Warning marker
+        const mk=this.scene.add.graphics().setDepth(3);
+        mk.fillStyle(C.red,0.6);mk.fillCircle(dropX,FLOOR_Y-4,18);
+        mk.lineStyle(2,C.red,1);mk.strokeCircle(dropX,FLOOR_Y-4,18);
+        // Falling seed
+        const seed=this.scene.add.graphics().setDepth(5);
+        seed.fillStyle(0xddaa00,1);seed.fillCircle(0,0,8);
+        seed.fillStyle(0xffee88,1);seed.fillCircle(-2,-2,3);
+        seed.setPosition(dropX,-20);
+        this.scene.tweens.add({targets:seed,y:FLOOR_Y-20,duration:420,ease:'Quad.In',onComplete:()=>{
+          mk.destroy();seed.destroy();
+          this.scene.ie.explode(dropX,FLOOR_Y-20);
+          this.scene.ie.shake(4,180);
+          if(this.scene.player&&this.scene.player.active){
+            const d=Math.abs(this.scene.player.x-dropX);
+            if(d<70){this.scene.player.hit(16,d<35?0:(this.scene.player.x>dropX?160:-160),-80,dropX);}
+          }
+        }});
+      });
+    }
+    this.scene.time.delayedCall(1500,()=>{if(this.bs!==BS3.DEAD)this.bs=BS3.IDLE;});
+  }
+  _doUppercut(){
+    this.bs=BS3.UPPER;this.setVelocityX(0);
+    this.scene._combatPop('ERECT UPPERCUT!!',0xff44aa,GW/2,GH/2-80,false);
+    // Short dash-in then massive rising uppercut with phallic trail
+    const sd=this.flipX?-1:1;
+    this.setVelocityX(-sd*220);
+    this.scene.time.delayedCall(220,()=>{
+      if(!this.active||this.bs===BS3.DEAD)return;
+      this.setVelocityX(0);
+      // Phallic rising graphic
+      const g=this.scene.add.graphics().setDepth(5).setPosition(this.x-sd*30,this.y-30);
+      g.fillStyle(0xee88dd,1);g.fillRect(-8,-80,16,80);
+      g.fillStyle(0xff99ee,1);g.fillCircle(0,-90,14);
+      g.fillStyle(C.yellow,1);g.fillCircle(0,-100,4);
+      this.scene.tweens.add({targets:g,y:this.y-120,alpha:0,scaleY:1.4,duration:360,ease:'Quad.Out',onComplete:()=>g.destroy()});
+      this.scene.ie.radialLines(this.x-sd*30,this.y-110,12,sd);
+      if(this.player&&this.player.active){
+        const d=Math.abs(this.player.x-this.x),dy=Math.abs(this.player.y-this.y);
+        if(d<150&&dy<130){this.player.hit(34,180,-420,this.x);this.scene.ie.flash(this.player);this.scene.ie.shake(9,500);}
+      }
+      this.scene.time.delayedCall(360,()=>{if(this.bs!==BS3.DEAD)this.bs=BS3.IDLE;});
+    });
+  }
+  _doStomp(){
+    this.bs=BS3.STOMP;this.setVelocityX(0);
+    this.scene._combatPop('BALL STOMP!!',C.orange,this.x,this.y-130,false);
+    this.setVelocityY(-360);
+    const sd=this.flipX?-1:1;
+    // Drift toward player midair
+    this.scene.time.delayedCall(140,()=>{if(this.active&&this.player){this.setVelocityX((this.player.x>this.x?1:-1)*180);}});
+    this.scene.time.delayedCall(420,()=>{
+      if(!this.active)return;
+      this.setVelocityX(0);this.setVelocityY(0);
+      this.scene.ie.ring(this.x,FLOOR_Y,C.orange);
+      this.scene.ie.ring(this.x,FLOOR_Y,C.yellow);
+      this.scene.ie.shake(11,500);
+      this.scene.ie.radialLines(this.x,FLOOR_Y-4,14,sd);
+      if(this.player&&this.player.active){
+        const d=Math.abs(this.player.x-this.x);
+        if(d<140){this.player.hit(32,0,-120,this.x);this.scene.ie.flash(this.player);this.scene._combatPop('CRUSHED!!',C.orange,GW/2,GH/2-80,false);}
+        else if(d<250){this.player.hit(14,0,-50,this.x);this.scene._combatPop('SHOCKWAVE!',C.yellow,GW/2,GH/2-80,false);}
+      }
+      this.scene.time.delayedCall(380,()=>{if(this.bs!==BS3.DEAD)this.bs=BS3.IDLE;});
+    });
+  }
+  _cleanSchlong(){
+    if(this._schlong&&this._schlong.active){
+      const sg=this._schlong;this._schlong=null;
+      this.scene.tweens.add({targets:sg,alpha:0,duration:250,onComplete:()=>sg.destroy()});
+    }
+  }
+  _tex(){
+    const m={
+      [BS3.IDLE]:this._wF?'boss_walk1':'boss_idle',
+      [BS3.WALK]:this._wF?'boss_walk1':'boss_idle',
+      [BS3.ATK]:'boss_atk',
+      [BS3.SWEEP_CHARGE]:'boss_charge',
+      [BS3.SWEEP]:'boss_spray',
+      [BS3.STORM]:'boss_charge',
+      [BS3.UPPER]:'boss_atk',
+      [BS3.STOMP]:'boss_atk',
+      [BS3.HURT]:'boss_hurt',
+    };
+    const k=m[this.bs]||'boss_idle';
+    if(this.texture.key!==k)this.setTexture(k);
+  }
+  takeDmg(amt,hd,fromX){
+    if(this.iF>0||this.bs===BS3.DEAD)return false;
+    if(this._enraged) amt=Math.round(amt*0.55);
+    this.hp-=amt;this.iF=140;
+    this._hitCount++;
+    const pct=Math.max(0,this.hp/this.maxHp);
+    this.scene.events.emit('bossHp',this.hp,this.maxHp);
+    this.setVelocityX(hd.kbX*(fromX<this.x?0.25:-0.25));
+    if(this.hp<=0){this._die();return true;}
+    if(!this._enraged&&pct<=0.50){
+      this._enraged=true;
+      this.setTint(0xff2288);
+      this.scene._bigPop('ENRAGED WANG!!',0xff2288);
+      this.scene.ie.shake(10,500);
+    }
+    if(this.bs===BS3.SWEEP_CHARGE||this.bs===BS3.SWEEP||this.bs===BS3.STORM)return true;
+    this.bs=BS3.HURT;
+    this.scene.time.delayedCall(180,()=>{if(this.active&&this.bs===BS3.HURT)this.bs=BS3.IDLE;});
+    return true;
+  }
+  _die(){
+    if(this.bs===BS3.DEAD)return;this.bs=BS3.DEAD;
+    this._cleanSchlong();
+    getSFX().bossRoar();
+    this.scene.ie.explode(this.x,this.y-50);this.scene.ie.explode(this.x-30,this.y-80);this.scene.ie.explode(this.x+30,this.y-40);
+    this.scene.ie.shake(18,1200);
+    this.scene.time.delayedCall(900,()=>{
+      this.scene.tweens.add({targets:this,alpha:0,duration:600,onComplete:()=>{this.scene.events.emit('bossKilled');this.destroy();}});
+    });
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
 //  YELLOW PEE DROP (manual position update — no Phaser physics)
 // ════════════════════════════════════════════════════════════════
 class PeeDrop{
@@ -1996,28 +2567,55 @@ class StageHUD{
 class MutPicker{
   constructor(s,muts,cb){
     this.s=s;this._els=[];
-    const ov=s.add.rectangle(GW/2,GH/2,GW,GH,0x000000,.85).setDepth(30).setScrollFactor(0);this._els.push(ov);
-    const pw=320,ph=230,pg=s.add.graphics().setDepth(30).setScrollFactor(0);
-    pg.fillStyle(0x050015,1);pg.fillRoundedRect(GW/2-pw/2,GH/2-ph/2,pw,ph,8);pg.lineStyle(2,C.pink,.9);pg.strokeRoundedRect(GW/2-pw/2,GH/2-ph/2,pw,ph,8);this._els.push(pg);
-    const hdr=s.add.text(GW/2,GH/2-ph/2+18,'MUTATION CHOICE!',{fontFamily:'Impact, Arial Black',fontSize:'20px',color:'#ff0088',stroke:'#000',strokeThickness:5}).setOrigin(.5,.5).setDepth(31).setScrollFactor(0);this._els.push(hdr);
-    const sp2=s.add.graphics().setDepth(31).setScrollFactor(0);sp2.lineStyle(1,C.pink,.4);sp2.lineBetween(GW/2-pw/2+12,GH/2-ph/2+34,GW/2+pw/2-12,GH/2-ph/2+34);this._els.push(sp2);
-    const cW=88,cH=150,gap=96,sx=GW/2-gap;
+    // Crisp helper — 2x resolution + auto-track for cleanup
+    const addTxt=(x,y,str,opts)=>{
+      const t=s.add.text(x,y,str,opts).setOrigin(.5,.5).setDepth(33).setScrollFactor(0).setResolution(2);
+      this._els.push(t);return t;
+    };
+    const ov=s.add.rectangle(GW/2,GH/2,GW,GH,0x000000,.88).setDepth(30).setScrollFactor(0);this._els.push(ov);
+    // Bigger panel so content can breathe
+    const pw=500,ph=340;
+    const pg=s.add.graphics().setDepth(30).setScrollFactor(0);
+    pg.fillStyle(0x050015,1);pg.fillRoundedRect(GW/2-pw/2,GH/2-ph/2,pw,ph,10);
+    pg.lineStyle(3,C.pink,1);pg.strokeRoundedRect(GW/2-pw/2,GH/2-ph/2,pw,ph,10);
+    this._els.push(pg);
+    // Header strip
+    const hdrBg=s.add.graphics().setDepth(30).setScrollFactor(0);
+    hdrBg.fillStyle(0x1a0033,1);hdrBg.fillRoundedRect(GW/2-pw/2,GH/2-ph/2,pw,40,{tl:10,tr:10,bl:0,br:0});
+    this._els.push(hdrBg);
+    addTxt(GW/2,GH/2-ph/2+20,'CHOOSE A MUTATION',{fontFamily:'Impact, Arial Black',fontSize:'26px',color:'#ffffff',stroke:'#ff0088',strokeThickness:5});
+    // Cards — wider, taller, more spacing
+    const cW=140,cH=240,gap=152,sx=GW/2-gap;
     muts.forEach((m,i)=>{
-      const cx=sx+i*gap,cy=GH/2+10,hx='#'+m.col.toString(16).padStart(6,'0');
+      const cx=sx+i*gap,cy=GH/2+18,hx='#'+m.col.toString(16).padStart(6,'0');
       const cg=s.add.graphics().setDepth(31).setScrollFactor(0);
-      const _draw=(a)=>{cg.clear();cg.fillStyle(0x0a0520,1);cg.fillRoundedRect(cx-cW/2,cy-cH/2,cW,cH,5);cg.lineStyle(a>0.8?3:2,m.col,a);cg.strokeRoundedRect(cx-cW/2,cy-cH/2,cW,cH,5);};_draw(.7);
+      const _draw=(a)=>{
+        cg.clear();
+        cg.fillStyle(0x0a0520,1);cg.fillRoundedRect(cx-cW/2,cy-cH/2,cW,cH,8);
+        cg.lineStyle(a>0.8?4:2,m.col,a);cg.strokeRoundedRect(cx-cW/2,cy-cH/2,cW,cH,8);
+      };_draw(.7);
       const z=s.add.zone(cx,cy,cW,cH).setDepth(32).setScrollFactor(0).setInteractive({useHandCursor:true});
-      const ic=s.add.graphics().setDepth(32).setScrollFactor(0);ic.fillStyle(m.col,.25);ic.fillCircle(cx,cy-38,28);ic.lineStyle(2,m.col,.7);ic.strokeCircle(cx,cy-38,28);
-      const it=s.add.text(cx,cy-38,m.sym,{fontFamily:'Impact, Arial Black',fontSize:'16px',color:hx,stroke:'#000',strokeThickness:3}).setOrigin(.5,.5).setDepth(33).setScrollFactor(0);
-      const nt=s.add.text(cx,cy+5,m.name,{fontFamily:'Impact, Arial Black',fontSize:'9px',color:hx,stroke:'#000',strokeThickness:2,wordWrap:{width:cW-10},align:'center'}).setOrigin(.5,.5).setDepth(33).setScrollFactor(0);
-      const bg2=s.add.graphics().setDepth(32).setScrollFactor(0);bg2.fillStyle(m.col,.9);bg2.fillRoundedRect(cx-cW/2+6,cy+cH/2-24,cW-12,18,3);
-      const bt=s.add.text(cx,cy+cH/2-15,m.badge,{fontFamily:'Impact',fontSize:'9px',color:'#000'}).setOrigin(.5,.5).setDepth(33).setScrollFactor(0);
-      this._els.push(cg,z,ic,it,nt,bg2,bt);
-      z.on('pointerover',()=>{_draw(1);s.tweens.add({targets:[it,nt],scaleX:1.05,scaleY:1.05,duration:80});});
-      z.on('pointerout', ()=>{_draw(.7);s.tweens.add({targets:[it,nt],scaleX:1,scaleY:1,duration:80});});
+      // Icon circle
+      const ic=s.add.graphics().setDepth(32).setScrollFactor(0);
+      ic.fillStyle(m.col,.3);ic.fillCircle(cx,cy-68,34);
+      ic.lineStyle(3,m.col,.9);ic.strokeCircle(cx,cy-68,34);
+      // Symbol inside circle — bigger, higher contrast
+      const it=addTxt(cx,cy-68,m.sym,{fontFamily:'Impact, Arial Black',fontSize:'28px',color:hx,stroke:'#000',strokeThickness:4});
+      // Name — WHITE with color stroke so it's always legible
+      const nt=addTxt(cx,cy-5,m.name,{fontFamily:'Impact, Arial Black',fontSize:'16px',color:'#ffffff',stroke:'#000',strokeThickness:4,wordWrap:{width:cW-12},align:'center'});
+      // Description (subtle, muted)
+      const desc=(MUT_DESCS&&MUT_DESCS[m.id])||'';
+      const dt=addTxt(cx,cy+38,desc,{fontFamily:'Arial',fontSize:'12px',color:'#ccddee',wordWrap:{width:cW-16},align:'center'});
+      // Badge bar at bottom — solid colored band with black text
+      const bg2=s.add.graphics().setDepth(32).setScrollFactor(0);
+      bg2.fillStyle(m.col,1);bg2.fillRoundedRect(cx-cW/2+8,cy+cH/2-32,cW-16,24,4);
+      const bt=addTxt(cx,cy+cH/2-20,m.badge,{fontFamily:'Impact, Arial Black',fontSize:'14px',color:'#000000'});
+      this._els.push(cg,z,ic,bg2);
+      z.on('pointerover',()=>{_draw(1);s.tweens.add({targets:[it,nt,dt],scaleX:1.05,scaleY:1.05,duration:80});});
+      z.on('pointerout', ()=>{_draw(.7);s.tweens.add({targets:[it,nt,dt],scaleX:1,scaleY:1,duration:80});});
       z.on('pointerdown',()=>{this._kill();cb(m);});
     });
-    const hint=s.add.text(GW/2,GH/2+ph/2-10,'Click to choose',{fontFamily:'Arial',fontSize:'10px',color:'#334455'}).setOrigin(.5,1).setDepth(31).setScrollFactor(0);this._els.push(hint);
+    addTxt(GW/2,GH/2+ph/2-16,'Click a card to pick',{fontFamily:'Arial',fontSize:'13px',color:'#889baa'});
   }
   _kill(){this._els.forEach(e=>{if(e?.destroy)e.destroy();});this._els=[];}
 }
@@ -2476,16 +3074,30 @@ class GameScene extends Phaser.Scene{
     this._topHUD=new TopHUD(this);
     this._comboHUD=new ComboHUD(this);
     this._stageHUD=new StageHUD(this);
-    this.add.text(GW/2,GH-4,'WASD=move  SPACE=jump  J=punch  K=kick  G=grapple  E=booth(club)',{fontFamily:'Arial',fontSize:'9px',color:'#243040'}).setOrigin(.5,1).setScrollFactor(0).setDepth(12);
+    this.add.text(GW/2,GH-4,'WASD=move  SPACE=jump  J=punch  K=kick (air=FLY KICK)  G=grab (J=slam, K=megakick, G=throw)',{fontFamily:'Arial',fontSize:'9px',color:'#243040'}).setOrigin(.5,1).setScrollFactor(0).setDepth(12);
 
     // Callbacks
-    this.cs.onChange=n=>this._comboHUD.update(n);
-    this.cs.onEnd=n=>{this._comboHUD.reset();if(n>=3)this._pop(`${n} HIT COMBO!`,n>=10?C.yellow:C.pink,GW/2,GH/2-30,false);};
+    this.cs.onChange=n=>{
+      this._comboHUD.update(n);
+      // Random hype callouts at milestone thresholds during a running combo
+      if(n===5||n===8||n===12||n===18||n===25){
+        const col=n>=18?C.yellow:n>=12?C.orange:n>=8?C.pink:C.cyan;
+        this._bigPop(hype(),col);
+      }
+    };
+    this.cs.onEnd=n=>{
+      this._comboHUD.reset();
+      if(n>=3){
+        const tag=n>=20?'★ GOD-TIER ★':n>=15?'★ LEGENDARY ★':n>=10?'★ INSANE ★':n>=6?'★ SICK ★':'COMBO';
+        this._pop(`${n} HIT ${tag}!`,n>=10?C.yellow:n>=6?C.orange:C.pink,GW/2,GH/2-30,false);
+      }
+    };
     this.events.on('playerHp',hp=>this._topHUD.setHp(hp,this.player.maxHp));
     this.events.on('enemyKilled',()=>this._checkWaveClear());
     this.events.on('bossHp',(hp,max)=>this._topHUD.setBossHp(hp,max));
     this.events.on('bossKilled',()=>{
-      if(STAGES[this._stageIdx]&&STAGES[this._stageIdx].boss2){this._victory();}
+      const sd=STAGES[this._stageIdx];
+      if(sd?.boss3){this._victory();}
       else{this._levelClear();}
     });
     this.events.on('playerDead',()=>this._gameOver());
@@ -2505,6 +3117,10 @@ class GameScene extends Phaser.Scene{
   _startStage(idx){
     if(this._pending)return;
     this._stageIdx=idx;
+    // Hard-reset camera so a mid-tween zoom pulse can't leak into the next stage
+    try{this.tweens.killTweensOf(this.cameras.main);}catch(e){}
+    this.cameras.main.zoom=1;
+    this.cameras.main.setScroll(0,0);
     const sd=STAGES[idx];
     this._topHUD.setStage(idx+1,sd.label);
     this._stageHUD.set(idx+1);
@@ -2526,6 +3142,11 @@ class GameScene extends Phaser.Scene{
         // Always apply VIP flair for boss2 stage (even if club was pre-built)
         this._applyClubStageFlair(idx,sd);
         this._boss2Intro();
+      } else if(sd.boss3){
+        // L3 boss fight — industrial shrine, penis-maniac
+        this._music.stop();
+        this._music.play('boss1');
+        this._boss3Intro();
       } else {
         // L1 boss fight — stop groove, play aggressive music
         this._music.stop();
@@ -2928,6 +3549,33 @@ class GameScene extends Phaser.Scene{
     });
   }
 
+  _boss3Intro(){
+    const ov=this.add.rectangle(GW/2,GH/2,GW,GH,0x000000,.78).setDepth(22);
+    const t1=this.add.text(GW/2,GH/2-60,'LEVEL 3 — FINAL',{fontFamily:'Impact, Arial Black',fontSize:'46px',color:'#cc44ff',stroke:'#000',strokeThickness:8}).setOrigin(.5,.5).setDepth(23).setAlpha(0);
+    const t2=this.add.text(GW/2,GH/2+10,'SHRINE OF THE WANG',{fontFamily:'Impact, Arial Black',fontSize:'32px',color:'#ffee00',stroke:'#000',strokeThickness:6}).setOrigin(.5,.5).setDepth(23).setAlpha(0);
+    const t3=this.add.text(GW/2,GH/2+60,'A ROBED CULT-PRIEST EMERGES...',{fontFamily:'Impact',fontSize:'18px',color:'#aaaaaa'}).setOrigin(.5,.5).setDepth(23).setAlpha(0);
+    const t4=this.add.text(GW/2,GH/2+90,'THE GRAND WANG MASTER',{fontFamily:'Impact, Arial Black',fontSize:'24px',color:'#ff44cc',stroke:'#000',strokeThickness:5}).setOrigin(.5,.5).setDepth(23).setAlpha(0);
+    this.tweens.add({targets:t1,alpha:1,duration:400,delay:200});
+    this.tweens.add({targets:t2,alpha:1,duration:400,delay:700});
+    this.tweens.add({targets:t3,alpha:1,duration:400,delay:1400});
+    this.tweens.add({targets:t4,alpha:1,duration:300,delay:2000});
+    this.time.delayedCall(3400,()=>{
+      [ov,t1,t2,t3,t4].forEach(o=>this.tweens.add({targets:o,alpha:0,duration:500,onComplete:()=>o.destroy()}));
+      this.time.delayedCall(600,()=>{
+        this.boss=new Boss3(this,GW+60,FLOOR_Y);
+        this.boss.player=this.player;
+        this.physics.add.collider(this.boss,this._floor);
+        this.ie.shake(12,700);
+        this._spawnEnemy('heavy',0,3);
+        this._spawnEnemy('heavy',1,3);
+        this._spawnEnemy('grunt',2,3);
+        this.tweens.add({targets:this.boss,x:GW-180,duration:1200,ease:'Power2.Out'});
+        this._combatPop('GRAND WANG MASTER!',0xcc44ff,GW/2,GH/2-30,false);
+        this._topHUD.setBossHp(this.boss.hp,this.boss.maxHp);
+      });
+    });
+  }
+
   _levelSelect(){
     const s=this;
     const ov=s.add.rectangle(GW/2,GH/2,GW,GH,0x000000,.88).setDepth(25);
@@ -2935,30 +3583,37 @@ class GameScene extends Phaser.Scene{
     const title=s.add.text(GW/2,GH/2-150,'SELECT LEVEL',{fontFamily:'Impact, Arial Black',fontSize:'52px',color:'#ffee00',stroke:'#000',strokeThickness:10}).setOrigin(.5,.5).setDepth(26);
 
     // Level 1 button
-    const btn1=s.add.rectangle(GW/2-170,GH/2,240,120,0x1155cc,1).setDepth(26);
-    const lbl1=s.add.text(GW/2-170,GH/2-22,'LEVEL 1',{fontFamily:'Impact, Arial Black',fontSize:'38px',color:'#ffffff',stroke:'#000',strokeThickness:6}).setOrigin(.5,.5).setDepth(27);
-    const sub1=s.add.text(GW/2-170,GH/2+22,'DISCO → BOSS',{fontFamily:'Impact',fontSize:'14px',color:'#aaccff',align:'center'}).setOrigin(.5,.5).setDepth(27);
-    const key1=s.add.text(GW/2-170,GH/2+68,'PRESS  1',{fontFamily:'Impact',fontSize:'20px',color:'#ffee00',stroke:'#000',strokeThickness:4}).setOrigin(.5,.5).setDepth(27);
+    const btn1=s.add.rectangle(GW/2-260,GH/2,220,120,0x1155cc,1).setDepth(26);
+    const lbl1=s.add.text(GW/2-260,GH/2-22,'LEVEL 1',{fontFamily:'Impact, Arial Black',fontSize:'34px',color:'#ffffff',stroke:'#000',strokeThickness:6}).setOrigin(.5,.5).setDepth(27);
+    const sub1=s.add.text(GW/2-260,GH/2+22,'STREETS → CLUB',{fontFamily:'Impact',fontSize:'13px',color:'#aaccff',align:'center'}).setOrigin(.5,.5).setDepth(27);
+    const key1=s.add.text(GW/2-260,GH/2+68,'PRESS  1',{fontFamily:'Impact',fontSize:'20px',color:'#ffee00',stroke:'#000',strokeThickness:4}).setOrigin(.5,.5).setDepth(27);
 
     // Level 2 button
-    const btn2=s.add.rectangle(GW/2+170,GH/2,240,120,0x115522,1).setDepth(26);
-    const lbl2=s.add.text(GW/2+170,GH/2-22,'LEVEL 2',{fontFamily:'Impact, Arial Black',fontSize:'38px',color:'#00ff88',stroke:'#000',strokeThickness:6}).setOrigin(.5,.5).setDepth(27);
-    const sub2=s.add.text(GW/2+170,GH/2+22,"CHROME DISTRICT\n→ THE GLITTER PIT",{fontFamily:'Impact',fontSize:'13px',color:'#66ffaa',align:'center'}).setOrigin(.5,.5).setDepth(27);
-    const key2=s.add.text(GW/2+170,GH/2+68,'PRESS  2',{fontFamily:'Impact',fontSize:'20px',color:'#ffee00',stroke:'#000',strokeThickness:4}).setOrigin(.5,.5).setDepth(27);
+    const btn2=s.add.rectangle(GW/2,GH/2,220,120,0x115522,1).setDepth(26);
+    const lbl2=s.add.text(GW/2,GH/2-22,'LEVEL 2',{fontFamily:'Impact, Arial Black',fontSize:'34px',color:'#00ff88',stroke:'#000',strokeThickness:6}).setOrigin(.5,.5).setDepth(27);
+    const sub2=s.add.text(GW/2,GH/2+22,'INSIDE THE\nGLITTER PIT',{fontFamily:'Impact',fontSize:'12px',color:'#66ffaa',align:'center'}).setOrigin(.5,.5).setDepth(27);
+    const key2=s.add.text(GW/2,GH/2+68,'PRESS  2',{fontFamily:'Impact',fontSize:'20px',color:'#ffee00',stroke:'#000',strokeThickness:4}).setOrigin(.5,.5).setDepth(27);
 
-    const hint=s.add.text(GW/2,GH/2+115,'★ Level 2 is wackier and harder ★',{fontFamily:'Impact',fontSize:'16px',color:'#556677'}).setOrigin(.5,.5).setDepth(26);
+    // Level 3 button
+    const btn3=s.add.rectangle(GW/2+260,GH/2,220,120,0x551188,1).setDepth(26);
+    const lbl3=s.add.text(GW/2+260,GH/2-22,'LEVEL 3',{fontFamily:'Impact, Arial Black',fontSize:'34px',color:'#ff66ff',stroke:'#000',strokeThickness:6}).setOrigin(.5,.5).setDepth(27);
+    const sub3=s.add.text(GW/2+260,GH/2+22,'HARBOR →\nWANG SHRINE',{fontFamily:'Impact',fontSize:'12px',color:'#ffaaff',align:'center'}).setOrigin(.5,.5).setDepth(27);
+    const key3=s.add.text(GW/2+260,GH/2+68,'PRESS  3',{fontFamily:'Impact',fontSize:'20px',color:'#ffee00',stroke:'#000',strokeThickness:4}).setOrigin(.5,.5).setDepth(27);
+
+    const hint=s.add.text(GW/2,GH/2+115,'★ Level 3 is the craziest ★',{fontFamily:'Impact',fontSize:'16px',color:'#556677'}).setOrigin(.5,.5).setDepth(26);
 
     // Pulse buttons
     s.tweens.add({targets:btn1,scaleX:1.04,scaleY:1.04,duration:520,yoyo:true,repeat:-1});
-    s.tweens.add({targets:btn2,scaleX:1.04,scaleY:1.04,duration:520,yoyo:true,repeat:-1,delay:260});
-    s.tweens.add({targets:[key1,key2],alpha:.4,duration:380,yoyo:true,repeat:-1});
+    s.tweens.add({targets:btn2,scaleX:1.04,scaleY:1.04,duration:520,yoyo:true,repeat:-1,delay:180});
+    s.tweens.add({targets:btn3,scaleX:1.04,scaleY:1.04,duration:520,yoyo:true,repeat:-1,delay:360});
+    s.tweens.add({targets:[key1,key2,key3],alpha:.4,duration:380,yoyo:true,repeat:-1});
 
-    // ALL objects tracked — title and hint included
-    const all=[ov,title,btn1,lbl1,sub1,key1,btn2,lbl2,sub2,key2,hint];
+    const all=[ov,title,btn1,lbl1,sub1,key1,btn2,lbl2,sub2,key2,btn3,lbl3,sub3,key3,hint];
     const pick=(lvl)=>{
       try{k1.destroy();}catch(e){}
       try{k2.destroy();}catch(e){}
-      s.tweens.killAll(); // stop pulsing animations
+      try{k3.destroy();}catch(e){}
+      s.tweens.killAll();
       all.forEach(o=>{
         if(!o?.active)return;
         s.tweens.add({targets:o,alpha:0,duration:300,onComplete:()=>{try{o.destroy();}catch(e){}}});
@@ -2968,9 +3623,11 @@ class GameScene extends Phaser.Scene{
 
     const k1=s.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE);
     const k2=s.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TWO);
+    const k3=s.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.THREE);
     const poll=s.time.addEvent({delay:40,loop:true,callback:()=>{
       if(Phaser.Input.Keyboard.JustDown(k1))pick(1);
       else if(Phaser.Input.Keyboard.JustDown(k2))pick(2);
+      else if(Phaser.Input.Keyboard.JustDown(k3))pick(3);
     }});
   }
 
@@ -3009,51 +3666,65 @@ class GameScene extends Phaser.Scene{
   _openDebug(){
     const s=this,d=this._dbg;d.open=true;
     const add=(o)=>{d.ui.push(o);o.setScrollFactor&&o.setScrollFactor(0);o.setDepth&&o.setDepth(100);return o;};
-    const W=380,H=470,X=GW-W-8,Y=54;
-    add(s.add.rectangle(X+W/2,Y+H/2,W,H,0x000000,0.92).setStrokeStyle(2,0xff0088));
-    add(s.add.text(X+10,Y+6,'DEBUG MENU   [§ to close]',{fontFamily:'Impact',fontSize:'16px',color:'#ff0088'}));
-    let cy=Y+32;
-    const section=(label)=>{ add(s.add.text(X+10,cy,label,{fontFamily:'Impact',fontSize:'13px',color:'#00f0ff'})); cy+=18; };
-    const btn=(x,y,w,h,label,color,onClick)=>{
-      const r=add(s.add.rectangle(x+w/2,y+h/2,w,h,color,0.85).setStrokeStyle(1,0xffffff,0.6).setInteractive({useHandCursor:true}));
-      add(s.add.text(x+w/2,y+h/2,label,{fontFamily:'Arial',fontSize:'11px',color:'#ffffff'}).setOrigin(.5,.5));
-      r.on('pointerdown',onClick);
+    // Crisp text: 2x resolution so CSS pixel-scale doesn't blur it
+    const addTxt=(x,y,str,opts)=>add(s.add.text(x,y,str,opts).setResolution(2));
+    // Bigger panel + taller rows for legibility
+    const W=520,H=620,X=GW-W-8,Y=54;
+    // Solid dark panel with heavy border
+    add(s.add.rectangle(X+W/2,Y+H/2,W,H,0x000000,0.95).setStrokeStyle(3,0xff0088));
+    // Header strip
+    add(s.add.rectangle(X+W/2,Y+18,W,36,0x1a0033,1));
+    addTxt(X+12,Y+6,'DEBUG MENU',{fontFamily:'Impact, Arial Black',fontSize:'20px',color:'#ff66bb',stroke:'#000',strokeThickness:3});
+    addTxt(X+W-12,Y+10,'[§] close',{fontFamily:'Arial',fontSize:'13px',color:'#aaaaaa'}).setOrigin(1,0);
+    let cy=Y+48;
+    const section=(label)=>{
+      // Colored divider strip
+      add(s.add.rectangle(X+W/2,cy+9,W-16,18,0x222244,1));
+      addTxt(X+14,cy+1,label,{fontFamily:'Impact, Arial Black',fontSize:'15px',color:'#00f0ff',stroke:'#000',strokeThickness:2});
+      cy+=24;
     };
-    // STAGES
+    const btn=(x,y,w,h,label,color,onClick)=>{
+      const r=add(s.add.rectangle(x+w/2,y+h/2,w,h,color,1).setStrokeStyle(1,0xffffff,0.7).setInteractive({useHandCursor:true}));
+      addTxt(x+w/2,y+h/2,label,{fontFamily:'Impact, Arial Black',fontSize:'14px',color:'#ffffff',stroke:'#000',strokeThickness:2}).setOrigin(.5,.5);
+      r.on('pointerdown',onClick);
+      r.on('pointerover',()=>r.setFillStyle(Phaser.Display.Color.ValueToColor(color).brighten(25).color,1));
+      r.on('pointerout',()=>r.setFillStyle(color,1));
+    };
+    // STAGES — 2 per row, wider buttons so full label shows
     section('STAGES (jump):');
     STAGES.forEach((sd,i)=>{
-      const col=i%4,row=Math.floor(i/4);
-      btn(X+10+col*88,cy+row*24,84,20,`${i+1}: ${sd.label.slice(0,9)}`,0x222266,()=>s._jumpStage(i));
+      const col=i%2,row=Math.floor(i/2);
+      btn(X+12+col*248,cy+row*28,244,24,`${i+1}. ${sd.label}`,0x223366,()=>s._jumpStage(i));
     });
-    cy+=52;
+    cy+=28*4+6;
     // PLAYER
     section('PLAYER:');
-    btn(X+10,cy,80,22,'HEAL',0x006622,()=>{s.player.hp=s.player.maxHp;s.events.emit('playerHp',s.player.hp);});
-    btn(X+95,cy,100,22,d.god?'GOD: ON':'GOD: OFF',d.god?0x886600:0x444444,()=>{d.god=!d.god;s._closeDebug();s._openDebug();});
-    btn(X+200,cy,80,22,'HURT 20',0x662222,()=>{const wasGod=d.god;d.god=false;s.player.iF=0;s.player.hit(20,100,-40,s.player.x+50);d.god=wasGod;});
-    cy+=28;
+    btn(X+12,cy,120,28,'HEAL FULL',0x006633,()=>{s.player.hp=s.player.maxHp;s.events.emit('playerHp',s.player.hp);});
+    btn(X+138,cy,140,28,d.god?'GOD MODE: ON':'GOD MODE: OFF',d.god?0xaa7700:0x444444,()=>{d.god=!d.god;s._closeDebug();s._openDebug();});
+    btn(X+284,cy,120,28,'HURT -20 HP',0x662222,()=>{const wasGod=d.god;d.god=false;s.player.iF=0;s.player.hit(20,100,-40,s.player.x+50);d.god=wasGod;});
+    cy+=34;
     // SPAWN
     section('SPAWN:');
-    btn(X+10,cy,80,22,'+ GRUNT',0x004488,()=>{const n=s.enemies.getChildren().length;s._spawnEnemy('grunt',n,n+1);});
-    btn(X+95,cy,80,22,'+ HEAVY',0x884400,()=>{const n=s.enemies.getChildren().length;s._spawnEnemy('heavy',n,n+1);});
-    btn(X+180,cy,100,22,'KILL ALL',0x662200,()=>{s.enemies.getChildren().forEach(e=>{try{if(e.hit)e.hit(9999,0,0,e.x+1);else{e.hp=0;e.destroy();}}catch(ex){}});});
-    cy+=28;
-    // MUTATIONS
+    btn(X+12,cy,120,28,'+ GRUNT',0x004488,()=>{const n=s.enemies.getChildren().length;s._spawnEnemy('grunt',n,n+1);});
+    btn(X+138,cy,120,28,'+ HEAVY',0x884400,()=>{const n=s.enemies.getChildren().length;s._spawnEnemy('heavy',n,n+1);});
+    btn(X+264,cy,140,28,'KILL ALL ENEMIES',0x662200,()=>{s.enemies.getChildren().forEach(e=>{try{if(e.hit)e.hit(9999,0,0,e.x+1);else{e.hp=0;e.destroy();}}catch(ex){}});});
+    cy+=34;
+    // MUTATIONS — 2 per row with solid check indicator
     section('MUTATIONS (toggle):');
     ALL_MUTS.forEach((m,i)=>{
       const col=i%2,row=Math.floor(i/2),on=!!s.muts[m.id];
-      btn(X+10+col*180,cy+row*22,175,20,`${on?'[x]':'[ ]'} ${m.name}`,on?0x552266:0x222233,()=>{
+      btn(X+12+col*248,cy+row*28,244,24,`${on?'✓ ':'   '}${m.name}`,on?0x772288:0x333355,()=>{
         if(on){s.muts[m.id]=false;s._mutList=s._mutList.filter(x=>x!==m.id);}
         else{s.muts[m.id]=true;if(!s._mutList.includes(m.id))s._mutList.push(m.id);}
         s._closeDebug();s._openDebug();
       });
     });
-    cy+=22*4+6;
+    cy+=28*4+6;
     // MISC
     section('MISC:');
-    btn(X+10,cy,88,22,'KILL BOSS',0x662266,()=>{if(s.boss){try{s.boss.hp=0;s.events.emit('bossKilled');s.boss.destroy();}catch(e){}s.boss=null;s._bossMode=false;}});
-    btn(X+103,cy,92,22,'NEXT STAGE',0x226622,()=>s._jumpStage(Math.min(STAGES.length-1,(s._stageIdx||0)+1)));
-    btn(X+200,cy,80,22,'CLR MUTS',0x444444,()=>{s.muts={};s._mutList=[];s._closeDebug();s._openDebug();});
+    btn(X+12,cy,120,28,'KILL BOSS',0x772266,()=>{if(s.boss){try{s.boss.hp=0;s.events.emit('bossKilled');s.boss.destroy();}catch(e){}s.boss=null;s._bossMode=false;}});
+    btn(X+138,cy,140,28,'NEXT STAGE →',0x226644,()=>s._jumpStage(Math.min(STAGES.length-1,(s._stageIdx||0)+1)));
+    btn(X+284,cy,120,28,'CLEAR MUTS',0x555555,()=>{s.muts={};s._mutList=[];s._closeDebug();s._openDebug();});
   }
   _jumpStage(i){
     const s=this;
@@ -3138,24 +3809,27 @@ class GameScene extends Phaser.Scene{
 
   _levelClear(){
     this._pending=true;
-    // Clean up all pee puddles/drops from Boss 1 before going to Level 2
+    const curLevel=STAGES[this._stageIdx]?.level||1;
+    const nextLevel=curLevel+1;
+    const nextIdx=LEVEL_STARTS[nextLevel-1];
+    // Clean up all pee puddles/drops before going to next level
     this.puddles.forEach(p=>{try{p._destroy();}catch(e){}});
     this.puddles=[];
     this.peeDrops.forEach(p=>{p._done=true;});
     this.peeDrops=[];
-    // Overlay: LEVEL 1 CLEAR!
+    // Overlay: LEVEL X CLEAR!
     const D=35;
     const curtain=this.add.rectangle(GW/2,GH/2,GW,GH,0x000000,0).setDepth(D);
     this.tweens.add({targets:curtain,fillAlpha:.82,duration:500});
     this.time.delayedCall(300,()=>{
-      const t1=this.add.text(GW/2,GH/2-55,'LEVEL 1',{fontFamily:'Impact, Arial Black',fontSize:'72px',color:'#ffee00',stroke:'#ff0088',strokeThickness:10}).setOrigin(.5,.5).setAlpha(0).setDepth(D+2);
+      const t1=this.add.text(GW/2,GH/2-55,`LEVEL ${curLevel}`,{fontFamily:'Impact, Arial Black',fontSize:'72px',color:'#ffee00',stroke:'#ff0088',strokeThickness:10}).setOrigin(.5,.5).setAlpha(0).setDepth(D+2);
       const t2=this.add.text(GW/2,GH/2+20,'CLEAR!!',{fontFamily:'Impact, Arial Black',fontSize:'64px',color:'#00f0ff',stroke:'#000',strokeThickness:8}).setOrigin(.5,.5).setAlpha(0).setDepth(D+2);
       const sc=this.add.text(GW/2,GH/2+80,`SCORE: ${this._score.toLocaleString()}`,{fontFamily:'Impact',fontSize:'22px',color:'#ffffff',stroke:'#000',strokeThickness:5}).setOrigin(.5,.5).setAlpha(0).setDepth(D+2);
-      const hint=this.add.text(GW/2,GH/2+115,'LEVEL 2 INCOMING...',{fontFamily:'Impact',fontSize:'14px',color:'#ff0088'}).setOrigin(.5,.5).setAlpha(0).setDepth(D+2);
+      const hint=this.add.text(GW/2,GH/2+115,`LEVEL ${nextLevel} INCOMING...`,{fontFamily:'Impact',fontSize:'14px',color:'#ff0088'}).setOrigin(.5,.5).setAlpha(0).setDepth(D+2);
       this.tweens.add({targets:[t1,t2,sc],alpha:1,duration:200});
       this.time.delayedCall(600,()=>{this.tweens.add({targets:hint,alpha:1,duration:300});});
       this.cameras.main.shake(400,0.012);
-      // After 3 seconds, partial HP restore then start Level 2
+      // After 3 seconds, partial HP restore then start next level
       this.time.delayedCall(3200,()=>{
         const restore=Math.min(this.player.maxHp, this.player.hp + Math.round(this.player.maxHp*0.4));
         this.player.hp=restore;
@@ -3164,7 +3838,8 @@ class GameScene extends Phaser.Scene{
         this.time.delayedCall(800,()=>{
           [t1,t2,sc,hint,curtain].forEach(o=>{try{if(o&&o.active)o.destroy();}catch(e){}});
           this._pending=false;
-          this._stageTransition(()=>this._startStage(LEVEL_STARTS[1]));
+          if(nextIdx!=null)this._stageTransition(()=>this._startStage(nextIdx));
+          else this._victory();
         });
       });
     });
